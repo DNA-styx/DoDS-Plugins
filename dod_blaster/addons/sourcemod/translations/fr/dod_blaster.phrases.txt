@@ -1,0 +1,24 @@
+"Phrases"
+{
+	"Blast Usage"
+	{
+		"fr"	"Utilisation : sm_blast <#userid|nom>"
+	}
+
+	"Blast Player"
+	{
+		"fr"	"Foudroyer un joueur"
+	}
+
+	"Blast Broadcast"
+	{
+		"#format"	"{1:s}"
+		"fr"	"Avertissement admin ! {1} a été frappé(e) par la foudre !"
+	}
+
+	"Blast Broadcast ML"
+	{
+		"#format"	"{1:t}"
+		"fr"	"Avertissement admin ! {1} ont été frappé(e)s par la foudre !"
+	}
+}

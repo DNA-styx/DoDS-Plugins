@@ -1,0 +1,24 @@
+"Phrases"
+{
+	"Blast Usage"
+	{
+		"en"	"Usage: sm_blast <#userid|name>"
+	}
+
+	"Blast Player"
+	{
+		"en"	"Blast Player"
+	}
+
+	"Blast Broadcast"
+	{
+		"#format"	"{1:s}"
+		"en"	"Admin warning! {1} has been struck by lightning!"
+	}
+
+	"Blast Broadcast ML"
+	{
+		"#format"	"{1:t}"
+		"en"	"Admin warning! {1} have been struck by lightning!"
+	}
+}

@@ -1,0 +1,24 @@
+"Phrases"
+{
+	"Blast Usage"
+	{
+		"de"	"Verwendung: sm_blast <#userid|name>"
+	}
+
+	"Blast Player"
+	{
+		"de"	"Spieler blitzen"
+	}
+
+	"Blast Broadcast"
+	{
+		"#format"	"{1:s}"
+		"de"	"Admin-Warnung! {1} wurde vom Blitz getroffen!"
+	}
+
+	"Blast Broadcast ML"
+	{
+		"#format"	"{1:t}"
+		"de"	"Admin-Warnung! {1} wurden vom Blitz getroffen!"
+	}
+}

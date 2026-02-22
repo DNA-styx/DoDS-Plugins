@@ -1,0 +1,24 @@
+"Phrases"
+{
+	"Blast Usage"
+	{
+		"zh"	"用法：sm_blast <#userid|名称>"
+	}
+
+	"Blast Player"
+	{
+		"zh"	"闪电击杀玩家"
+	}
+
+	"Blast Broadcast"
+	{
+		"#format"	"{1:s}"
+		"zh"	"管理员警告！{1} 被闪电击中！"
+	}
+
+	"Blast Broadcast ML"
+	{
+		"#format"	"{1:t}"
+		"zh"	"管理员警告！{1} 被闪电击中！"
+	}
+}
