@@ -4,87 +4,42 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define PLUGIN_VERSION "1.1"
+#define PLUGIN_VERSION "1.2"
 
 // Falling velocity threshold (negative Z velocity)
 #define FALL_THRESHOLD -300.0
 
-// Track which bots are currently using parachute
-bool g_bUsingParachute[MAXPLAYERS + 1];
-
 public Plugin myinfo = 
 {
-    name = "Bot Auto-Parachute",
-    author = "Claude.ai. guided by DNA.styx",
-    description = "Automatically activates parachutes for bots when falling",
+    name = "Bot Auto-Parachute (Optimized)",
+    author = "Claude.ai guided by DNA.styx",
+    description = "Automatically activates parachutes for bots via OnPlayerRunCmd",
     version = PLUGIN_VERSION,
     url = "https://github.com/DNA-styx/DoDS-Plugins"
 };
 
-public void OnPluginStart()
+public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
 {
-    // Create a repeating timer to check bot states every 0.1 seconds
-    CreateTimer(0.1, Timer_CheckBots, _, TIMER_REPEAT);
-}
-
-public void OnClientDisconnect(int client)
-{
-    // Clean up tracking when client disconnects
-    g_bUsingParachute[client] = false;
-}
-
-public Action Timer_CheckBots(Handle timer)
-{
-    for (int client = 1; client <= MaxClients; client++)
+    // 1. Only run for bots that are alive and in-game
+    if (IsClientInGame(client) && IsFakeClient(client) && IsPlayerAlive(client))
     {
-        // Skip if not connected, not in game, or not a bot
-        if (!IsClientInGame(client) || !IsFakeClient(client))
-            continue;
-        
-        // Skip if dead
-        if (!IsPlayerAlive(client))
-        {
-            g_bUsingParachute[client] = false;
-            continue;
-        }
-        
-        // Check if bot is in the air
+        // 2. Check if the bot is in the air
+        // m_hGroundEntity is -1 when the player is falling/jumping
         int groundEntity = GetEntPropEnt(client, Prop_Send, "m_hGroundEntity");
-        bool isOnGround = (groundEntity != -1);
         
-        if (!isOnGround)
+        if (groundEntity == -1)
         {
-            // If not already using parachute, check if we should activate it
-            if (!g_bUsingParachute[client])
-            {
-                // Get velocity to check if falling
-                float velocity[3];
-                GetEntPropVector(client, Prop_Data, "m_vecVelocity", velocity);
-                
-                // If falling fast enough, activate parachute
-                if (velocity[2] < FALL_THRESHOLD)
-                {
-                    g_bUsingParachute[client] = true;
-                }
-            }
+            // 3. Check downward velocity (Z-axis)
+            float velocity[3];
+            GetEntPropVector(client, Prop_Data, "m_vecVelocity", velocity);
             
-            // If parachute is active, keep holding +use
-            if (g_bUsingParachute[client])
+            if (velocity[2] < FALL_THRESHOLD)
             {
-                int buttons = GetClientButtons(client);
+                // 4. Force the IN_USE button 
                 buttons |= IN_USE;
-                SetEntProp(client, Prop_Data, "m_nButtons", buttons);
-            }
-        }
-        else
-        {
-            // Bot is on ground, release parachute
-            if (g_bUsingParachute[client])
-            {
-                g_bUsingParachute[client] = false;
             }
         }
     }
-    
+
     return Plugin_Continue;
 }
