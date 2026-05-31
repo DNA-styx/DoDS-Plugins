@@ -1,0 +1,7 @@
+"Phrases"
+{
+	"Voice Suppressed"
+	{
+		"en"	"Voice command suppressed"
+	}
+}
