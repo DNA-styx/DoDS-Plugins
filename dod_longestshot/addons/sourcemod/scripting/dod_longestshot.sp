@@ -4,8 +4,7 @@
 #include <sourcemod>
 #include <sdktools>
 
-#define PLUGIN_VERSION  "1.4.dev.dna"
-#define MIN_DISTANCE    75.0
+#define PLUGIN_VERSION  "1.10.dev.dna"
 #define MAX_RECORDS     10
 
 // DoD:S Team Constants
@@ -28,19 +27,34 @@ public Plugin myinfo =
 // Per-record data
 char  g_sName[MAX_RECORDS][64];
 char  g_sVictimName[MAX_RECORDS][64];
+char  g_sSteamID[MAX_RECORDS][32];       // Killer's SteamID, stored at kill time
+int   g_iTeam[MAX_RECORDS];              // Killer's team, stored at kill time
 float g_fDist[MAX_RECORDS];
-char  g_sWeapon[MAX_RECORDS][64];
+char  g_sWeapon[MAX_RECORDS][64];        // Raw weapon name, used in logs
+char  g_sWeaponDisplay[MAX_RECORDS][64]; // Display weapon name, used in panel
+
 int   g_iRecordCount;
 
 // Global StringMap to track the absolute longest shot per weapon for chat announcements
 StringMap g_smWeaponRecords;
 
+ConVar g_cvMinDistance;
+
 public void OnPluginStart()
 {
     g_smWeaponRecords = new StringMap();
 
+    g_cvMinDistance = CreateConVar(
+        "sm_longestshot_min_distance",
+        "50",
+        "Minimum distance in metres for a shot to qualify for the leaderboard.",
+        FCVAR_NONE, true, 1.0
+    );
+
     HookEvent("player_death", Event_PlayerDeath);
     RegConsoleCmd("sm_shots", Command_Shots, "Show longest shots this map");
+
+    AutoExecConfig(true, "dod_longestshot");
 }
 
 bool g_bPanelShown;
@@ -80,15 +94,32 @@ public Action Timer_CheckTimeLeft(Handle timer)
     return Plugin_Continue;
 }
 
+public void OnMapEnd()
+{
+    // Log the winner at true map end regardless of how the map ended.
+    // Uses stored SteamID and team so it works even if the player has disconnected.
+    if (g_iRecordCount > 0)
+    {
+        LogToGame("\"%s<0><%s><%s>\" triggered \"longshot_winner\"",
+            g_sName[0],
+            g_sSteamID[0],
+            LongShot_GetTeamName(g_iTeam[0])
+        );
+    }
+}
+
 void ResetRecords()
 {
     g_iRecordCount = 0;
     for (int i = 0; i < MAX_RECORDS; i++)
     {
-        g_sName[i][0]       = '\0';
-        g_sVictimName[i][0] = '\0';
-        g_fDist[i]          = 0.0;
-        g_sWeapon[i][0]     = '\0';
+        g_sName[i][0]          = '\0';
+        g_sVictimName[i][0]    = '\0';
+        g_sSteamID[i][0]       = '\0';
+        g_iTeam[i]             = 0;
+        g_fDist[i]             = 0.0;
+        g_sWeapon[i][0]        = '\0';
+        g_sWeaponDisplay[i][0] = '\0';
     }
 }
 
@@ -112,7 +143,7 @@ public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadca
 
     float distance = GetVectorDistance(vAttacker, vVictim) / UNITS_PER_METRE;
 
-    if (distance < MIN_DISTANCE)
+    if (distance < g_cvMinDistance.FloatValue)
         return Plugin_Continue;
 
     char rawWeapon[64], displayWeapon[64];
@@ -138,6 +169,22 @@ public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadca
     GetClientName(attacker, shooterName, sizeof(shooterName));
     GetClientName(victim,   victimName,  sizeof(victimName));
 
+    char attackerSteamID[32], victimSteamID[32];
+    GetClientAuthId(attacker, AuthId_Steam2, attackerSteamID, sizeof(attackerSteamID));
+    GetClientAuthId(victim,   AuthId_Steam2, victimSteamID,   sizeof(victimSteamID));
+
+    int attackerUserID = GetClientUserId(attacker);
+    int victimUserID   = GetClientUserId(victim);
+    int attackerTeam   = GetClientTeam(attacker);
+    int victimTeam     = GetClientTeam(victim);
+
+    // Standard Source engine kill log — fires for every qualifying shot
+    LogToGame("\"%s<%d><%s><%s>\" killed \"%s<%d><%s><%s>\" with \"longshot_%s\"",
+        shooterName, attackerUserID, attackerSteamID, LongShot_GetTeamName(attackerTeam),
+        victimName,  victimUserID,   victimSteamID,   LongShot_GetTeamName(victimTeam),
+        stripped
+    );
+
     float currentBest = 0.0;
     g_smWeaponRecords.GetValue(displayWeapon, currentBest);
 
@@ -148,7 +195,7 @@ public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadca
         isNewWeaponRecord = true;
     }
 
-    InsertRecord(shooterName, victimName, distance, displayWeapon);
+    InsertRecord(shooterName, victimName, attackerSteamID, attackerTeam, distance, stripped, displayWeapon);
 
     if (isNewWeaponRecord)
     {
@@ -161,6 +208,19 @@ public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadca
     }
 
     return Plugin_Continue;
+}
+
+// Helper: return the DoD:S team name string used in standard game logs
+char[] LongShot_GetTeamName(int team)
+{
+    char teamName[16];
+    switch (team)
+    {
+        case TEAM_ALLIES: strcopy(teamName, sizeof(teamName), "Allies");
+        case TEAM_AXIS:   strcopy(teamName, sizeof(teamName), "Axis");
+        default:          strcopy(teamName, sizeof(teamName), "Unassigned");
+    }
+    return teamName;
 }
 
 // Helper: wrap a player name in their team colour using hex colour codes
@@ -181,7 +241,7 @@ void GetColoredName(int client, char[] buffer, int maxlen)
     }
 }
 
-void InsertRecord(const char[] playerName, const char[] victimName, float distance, const char[] weapon)
+void InsertRecord(const char[] playerName, const char[] victimName, const char[] steamID, int team, float distance, const char[] weapon, const char[] weaponDisplay)
 {
     int existingIndex = -1;
     for (int i = 0; i < g_iRecordCount; i++)
@@ -200,10 +260,13 @@ void InsertRecord(const char[] playerName, const char[] victimName, float distan
 
         for (int i = existingIndex; i < g_iRecordCount - 1; i++)
         {
-            strcopy(g_sName[i],       sizeof(g_sName[]),       g_sName[i+1]);
-            strcopy(g_sVictimName[i], sizeof(g_sVictimName[]), g_sVictimName[i+1]);
+            strcopy(g_sName[i],          sizeof(g_sName[]),          g_sName[i+1]);
+            strcopy(g_sVictimName[i],    sizeof(g_sVictimName[]),    g_sVictimName[i+1]);
+            strcopy(g_sSteamID[i],       sizeof(g_sSteamID[]),       g_sSteamID[i+1]);
+            g_iTeam[i] = g_iTeam[i+1];
             g_fDist[i] = g_fDist[i+1];
-            strcopy(g_sWeapon[i],     sizeof(g_sWeapon[]),     g_sWeapon[i+1]);
+            strcopy(g_sWeapon[i],        sizeof(g_sWeapon[]),        g_sWeapon[i+1]);
+            strcopy(g_sWeaponDisplay[i], sizeof(g_sWeaponDisplay[]), g_sWeaponDisplay[i+1]);
         }
         g_iRecordCount--;
     }
@@ -224,16 +287,22 @@ void InsertRecord(const char[] playerName, const char[] victimName, float distan
     int shiftTo = (g_iRecordCount < MAX_RECORDS) ? g_iRecordCount : MAX_RECORDS - 1;
     for (int i = shiftTo; i > insertPos; i--)
     {
-        strcopy(g_sName[i],       sizeof(g_sName[]),       g_sName[i-1]);
-        strcopy(g_sVictimName[i], sizeof(g_sVictimName[]), g_sVictimName[i-1]);
+        strcopy(g_sName[i],          sizeof(g_sName[]),          g_sName[i-1]);
+        strcopy(g_sVictimName[i],    sizeof(g_sVictimName[]),    g_sVictimName[i-1]);
+        strcopy(g_sSteamID[i],       sizeof(g_sSteamID[]),       g_sSteamID[i-1]);
+        g_iTeam[i] = g_iTeam[i-1];
         g_fDist[i] = g_fDist[i-1];
-        strcopy(g_sWeapon[i],     sizeof(g_sWeapon[]),     g_sWeapon[i-1]);
+        strcopy(g_sWeapon[i],        sizeof(g_sWeapon[]),        g_sWeapon[i-1]);
+        strcopy(g_sWeaponDisplay[i], sizeof(g_sWeaponDisplay[]), g_sWeaponDisplay[i-1]);
     }
 
-    strcopy(g_sName[insertPos],       sizeof(g_sName[]),       playerName);
-    strcopy(g_sVictimName[insertPos], sizeof(g_sVictimName[]), victimName);
+    strcopy(g_sName[insertPos],          sizeof(g_sName[]),          playerName);
+    strcopy(g_sVictimName[insertPos],    sizeof(g_sVictimName[]),    victimName);
+    strcopy(g_sSteamID[insertPos],       sizeof(g_sSteamID[]),       steamID);
+    g_iTeam[insertPos] = team;
     g_fDist[insertPos] = distance;
-    strcopy(g_sWeapon[insertPos],     sizeof(g_sWeapon[]),     weapon);
+    strcopy(g_sWeapon[insertPos],        sizeof(g_sWeapon[]),        weapon);
+    strcopy(g_sWeaponDisplay[insertPos], sizeof(g_sWeaponDisplay[]), weaponDisplay);
 
     if (g_iRecordCount < MAX_RECORDS)
         g_iRecordCount++;
@@ -258,7 +327,9 @@ void ShowShotsPanel(int client, int duration)
 
     if (g_iRecordCount == 0)
     {
-        menu.AddItem("", "No qualifying shots yet. (min 75m)");
+        char emptyMsg[64];
+        Format(emptyMsg, sizeof(emptyMsg), "No qualifying shots yet. (min %.0fm)", g_cvMinDistance.FloatValue);
+        menu.AddItem("", emptyMsg);
     }
     else
     {
@@ -268,7 +339,7 @@ void ShowShotsPanel(int client, int duration)
             Format(line, sizeof(line), "%s vs. %s | %s | %.0fm",
                 g_sName[i],
                 g_sVictimName[i],
-                g_sWeapon[i],
+                g_sWeaponDisplay[i],
                 g_fDist[i]
             );
             menu.AddItem("", line);
@@ -297,32 +368,8 @@ void FormatWeaponName(const char[] raw, char[] display, int maxlen)
     else
         strcopy(stripped, sizeof(stripped), raw);
 
-    if      (StrEqual(stripped, "k98_scoped",    false)) strcopy(display, maxlen, "Kar98k Scoped");
-    else if (StrEqual(stripped, "k98",           false)) strcopy(display, maxlen, "Kar98k");
-    else if (StrEqual(stripped, "spring",        false)) strcopy(display, maxlen, "Springfield");
-    else if (StrEqual(stripped, "garand",        false)) strcopy(display, maxlen, "M1 Garand");
-    else if (StrEqual(stripped, "mp40",          false)) strcopy(display, maxlen, "MP40");
-    else if (StrEqual(stripped, "mp44",          false)) strcopy(display, maxlen, "MP44");
-    else if (StrEqual(stripped, "bar",           false)) strcopy(display, maxlen, "BAR");
-    else if (StrEqual(stripped, "30cal",         false)) strcopy(display, maxlen, "30 Cal MG");
-    else if (StrEqual(stripped, "mg42",          false)) strcopy(display, maxlen, "MG42");
-    else if (StrEqual(stripped, "thompson",      false)) strcopy(display, maxlen, "Thompson");
-    else if (StrEqual(stripped, "greasegun",     false)) strcopy(display, maxlen, "Grease Gun");
-    else if (StrEqual(stripped, "colt",          false)) strcopy(display, maxlen, "Colt .45");
-    else if (StrEqual(stripped, "p38",           false)) strcopy(display, maxlen, "P38");
-    else if (StrEqual(stripped, "c96",           false)) strcopy(display, maxlen, "C96");
-    else if (StrEqual(stripped, "bazooka",       false)) strcopy(display, maxlen, "Bazooka");
-    else if (StrEqual(stripped, "pschreck",      false)) strcopy(display, maxlen, "Panzerschreck");
-    else if (StrEqual(stripped, "riflegren_us",  false) ||
-             StrEqual(stripped, "riflegren_ger", false)) strcopy(display, maxlen, "Rifle Grenade");
-    else if (StrEqual(stripped, "frag_us",       false) ||
-             StrEqual(stripped, "frag_ger",      false)) strcopy(display, maxlen, "Grenade");
-    else if (StrEqual(stripped, "smoke_us",      false) ||
-             StrEqual(stripped, "smoke_ger",     false)) strcopy(display, maxlen, "Smoke Grenade");
-    else
-    {
-        strcopy(display, maxlen, stripped);
-        if (display[0] >= 'a' && display[0] <= 'z')
-            display[0] -= 32;
-    }
+    if      (StrEqual(stripped, "k98_scoped", false)) strcopy(display, maxlen, "Kar98k Scoped");
+    else if (StrEqual(stripped, "spring",     false)) strcopy(display, maxlen, "Springfield");
+    else if (StrEqual(stripped, "pschreck",   false)) strcopy(display, maxlen, "Panzerschreck");
+    else if (StrEqual(stripped, "bazooka",    false)) strcopy(display, maxlen, "Bazooka");
 }
